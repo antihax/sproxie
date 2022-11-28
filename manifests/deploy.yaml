@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sproxie
+  namespace: kube-system
+  labels:
+    app: sproxie
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sproxie
+  template:
+    metadata:
+      labels:
+        app: sproxie
+    spec:
+      dnsPolicy: Default
+      priorityClassName: system-cluster-critical
+      hostNetwork: true
+      serviceAccountName: cloud-controller-manager
+      tolerations:
+        - key: "node.cloudprovider.kubernetes.io/uninitialized"
+          value: "true"
+          effect: "NoSchedule"
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+        - key: "node-role.kubernetes.io/master"
+          effect: NoSchedule
+      containers:
+      - name: sproxie
+        image: antihax/sproxie
+        command:
+          - "/sproxie"
+          - "--cloud-provider=sproxie"
+          - "--leader-elect=false"
+          - "--allow-untagged-cloud=true"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 50Mi
+          limits:
+            cpu: 250m
+            memory: 100Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cloud-controller-manager
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  name: system:cloud-controller-manager
+rules:
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - create
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - "*"
+- apiGroups:
+  - ""
+  resources:
+  - nodes/status
+  - services/status
+  verbs:
+  - patch
+- apiGroups: # Monitor pod and services for LoadBalancer changes
+  - ""
+  resources:
+  - services
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups: # Change LoadBalancer Services annotations
+  - ""
+  resources:
+  - services
+  verbs:
+  - patch
+  - update
+- apiGroups: # Additional Service Accounts (Do we need this?)
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+- apiGroups: # initial CCM namespace creation
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+- apiGroups: # control klipper-lb LoadBalancer daemonsets
+  - apps
+  resources:
+  - daemonsets
+  verbs:
+  - "*"
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: system:cloud-controller-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:cloud-controller-manager
+subjects:
+- kind: ServiceAccount
+  name: cloud-controller-manager
+  namespace: kube-system
